@@ -53,8 +53,32 @@ def emulate_plt_instructions(elf, got, address, data, targets):
 
     return rv
 
+
+def __ensure_memory_to_run_unicorn():
+    """
+    Check if there is enough memory to run Unicorn Engine.
+    Unicorn Engine requires 1GB of memory to run, if there isn't enough memory it calls exit(1).
+
+    This is a bug in Unicorn Engine, see: https://github.com/unicorn-engine/unicorn/issues/1766
+    """
+    try:
+        from mmap import mmap, MAP_ANON, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE
+
+        mm = mmap(
+            -1, 1024 * 1024 * 1024, MAP_PRIVATE | MAP_ANON, PROT_WRITE | PROT_READ | PROT_EXEC
+        )
+        mm.close()
+    except OSError:
+        raise OSError("Cannot allocate 1GB memory to run Unicorn Engine")
+    except ImportError:
+        # Can only mmap files on Windows, would need to use VirtualAlloc.
+        pass
+
+
 def prepare_unicorn_and_context(elf, got, address, data):
     import unicorn as U
+
+    __ensure_memory_to_run_unicorn()
 
     # Instantiate the emulator with the correct arguments for the current
     # architecutre.
@@ -145,8 +169,8 @@ def emulate_plt_instructions_inner(uc, elf, got, pc, data):
         return False
 
     hooks = [
-        uc.hook_add(U.UC_HOOK_MEM_READ | U.UC_HOOK_MEM_READ_UNMAPPED,
-                    hook_mem, stopped_addr),
+        uc.hook_add(U.UC_HOOK_MEM_READ, hook_mem, stopped_addr),
+        uc.hook_add(U.UC_HOOK_MEM_READ_UNMAPPED, hook_mem, stopped_addr),
     ]
 
     # callback for tracing instructions
